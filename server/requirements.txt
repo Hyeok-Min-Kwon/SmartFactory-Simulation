@@ -3,3 +3,8 @@ uvicorn[standard]
 python-dotenv
 python-multipart
 paho-mqtt
+
+# Image Processing & ML
+opencv-python
+ultralytics
+numpy

@@ -1,0 +1,9 @@
+# Training
+training/ppe_detection/datasets/
+training/ppe_detection/runs/
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+.DS_Store

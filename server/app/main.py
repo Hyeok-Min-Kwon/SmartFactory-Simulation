@@ -8,9 +8,12 @@ import uuid
 # 환경변수 로드
 load_dotenv()
 
+# 라우터 임포트
+from .routers import ppe
+
 app = FastAPI(
-    title="Defect Detection API",
-    description="제조 결함 검사 시스템",
+    title="Smart Factory API",
+    description="스마트 팩토리 - PPE 감지 및 결함 검사 시스템",
     version="1.0.0"
 )
 
@@ -31,6 +34,10 @@ async def verify_api_key(x_api_key: str = Header(...)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API Key")
     return x_api_key
+
+
+# PPE 라우터 등록
+app.include_router(ppe.router)
 
 # 이미지 저장 디렉토리
 UPLOAD_DIR = "uploaded_images"
