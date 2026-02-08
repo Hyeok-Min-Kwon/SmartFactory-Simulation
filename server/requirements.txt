@@ -5,6 +5,6 @@ python-multipart
 paho-mqtt
 
 # Image Processing & ML
-opencv-python
+opencv-python-headless
 ultralytics
 numpy
