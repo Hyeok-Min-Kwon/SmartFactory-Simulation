@@ -6,7 +6,7 @@ import time
 import random
 from AGV  import AGV
 # Franka 로봇 제어 모듈 임포트
-from franka_robot import FrankaRobot
+from simulation.franka_robot import FrankaRobot
 
 # CoppeliaSim과 통신할 RemoteAPIClient 객체를 생성합니다
 client = RemoteAPIClient()

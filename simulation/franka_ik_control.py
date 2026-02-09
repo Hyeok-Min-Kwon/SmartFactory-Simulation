@@ -6,7 +6,7 @@ Franka 로봇 IK 제어 스크립트
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import time
-from ik_solver import IKSolver
+from simulation.ik_solver import IKSolver
 
 
 def create_target_dummy(sim, tip_handle, dummy_name="FrankaTarget"):
