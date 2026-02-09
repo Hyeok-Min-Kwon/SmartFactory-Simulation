@@ -51,7 +51,21 @@ def train_ppe_model(
         save=True,
         save_period=10,
         val=True,
-        plots=True
+        plots=True,
+        # Data Augmentation 강화
+        hsv_h=0.015,      # 색조 증강
+        hsv_s=0.7,        # 채도 증강
+        hsv_v=0.4,        # 명도 증강
+        degrees=10.0,     # 회전 (0 → 10도)
+        translate=0.2,    # 이동 (0.1 → 0.2)
+        scale=0.9,        # 스케일 (0.5 → 0.9)
+        shear=5.0,        # 전단 변환 (0 → 5도)
+        perspective=0.0001,  # 원근 변환
+        flipud=0.0,       # 상하 반전
+        fliplr=0.5,       # 좌우 반전
+        mosaic=1.0,       # 모자이크 증강
+        mixup=0.1,        # Mixup 증강 (0 → 0.1)
+        copy_paste=0.1    # Copy-paste 증강 (0 → 0.1)
     )
 
     print("\n" + "=" * 50)

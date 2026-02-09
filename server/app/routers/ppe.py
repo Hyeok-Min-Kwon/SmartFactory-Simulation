@@ -7,6 +7,8 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Header
 from fastapi.responses import Response
 import os
 from datetime import datetime
+import asyncio
+from pathlib import Path
 
 from ..models.ppe_detector import get_ppe_detector, PPEDetector
 from ..services.image_processor import ImageProcessor
@@ -133,6 +135,88 @@ async def detect_ppe_with_visualization(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
+
+
+@router.post("/check")
+async def check_ppe_from_camera():
+    """
+    시뮬레이션에서 호출: 카메라로 PPE 체크
+
+    플로우:
+    1. 아두이노에 사진 촬영 요청 (MQTT)
+    2. 아두이노가 촬영한 이미지 대기
+    3. PPE 감지 수행
+    4. 결과 반환
+
+    현재는 임시로 테스트 이미지 사용
+    """
+    detector = get_ppe_detector()
+
+    if not detector.is_ready():
+        return {
+            "status": "error",
+            "message": "PPE detection model not loaded",
+            "mask_detected": False
+        }
+
+    try:
+        # TODO: MQTT로 아두이노에 사진 촬영 요청
+        # mqtt_client.publish("arduino/camera/trigger", "capture")
+
+        # TODO: 아두이노로부터 이미지 수신 대기
+        # await asyncio.sleep(2)  # 촬영 대기
+        # image_path = await get_latest_captured_image()
+
+        # 임시: uploaded_images 디렉토리에서 최신 이미지 사용
+        upload_dir = Path("uploaded_images")
+        if not upload_dir.exists():
+            return {
+                "status": "error",
+                "message": "No images available. Please upload an image first.",
+                "mask_detected": False
+            }
+
+        # 가장 최근 이미지 찾기
+        image_files = list(upload_dir.glob("*.jpg")) + list(upload_dir.glob("*.png"))
+        if not image_files:
+            return {
+                "status": "error",
+                "message": "No images found in uploaded_images directory",
+                "mask_detected": False
+            }
+
+        latest_image = max(image_files, key=lambda p: p.stat().st_mtime)
+        print(f"Using latest image: {latest_image}")
+
+        # 이미지 읽기 및 PPE 감지
+        with open(latest_image, "rb") as f:
+            image_bytes = f.read()
+
+        result = detector.detect_from_bytes(image_bytes)
+
+        if "error" in result:
+            return {
+                "status": "error",
+                "message": result["error"],
+                "mask_detected": False
+            }
+
+        return {
+            "status": "success",
+            "mask_detected": result["mask_detected"],
+            "ppe_compliant": result["ppe_compliant"],
+            "detections_count": result["total_detections"],
+            "message": "마스크 착용 확인" if result["mask_detected"] else "마스크 미착용",
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        print(f"PPE check error: {e}")
+        return {
+            "status": "error",
+            "message": f"PPE check failed: {str(e)}",
+            "mask_detected": False
+        }
 
 
 @router.post("/check-compliance", dependencies=[Depends(verify_api_key)])
