@@ -2,10 +2,10 @@
 # Roboflow에서 다운받은 데이터셋 경로에 맞게 수정하세요
 
 # 데이터셋 경로 (절대 경로 또는 이 파일 기준 상대 경로)
-path: ./datasets  # 데이터셋 루트 폴더
-train: images/train  # 학습 이미지 폴더
-val: images/val  # 검증 이미지 폴더
-test: images/test  # 테스트 이미지 폴더 (선택)
+path: ./datasets/Mask Wearing.v4-raw.yolov8  # 데이터셋 루트 폴더
+train: train/images  # 학습 이미지 폴더
+val: valid/images  # 검증 이미지 폴더
+test: test/images  # 테스트 이미지 폴더 (선택)
 
 # 클래스 정의
 names:
