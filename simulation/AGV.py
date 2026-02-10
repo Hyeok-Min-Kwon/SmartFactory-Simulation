@@ -89,17 +89,17 @@ class AGV:
     
     
 
-client = RemoteAPIClient()
+# client = RemoteAPIClient()
 
-sim = client.require('sim')
-dummy_object=sim.getObject('/dummy')
-dummy_position = sim.getObjectPosition(dummy_object,sim.handle_world)
-print(dummy_position)
-sim.startSimulation()
-omni1 = AGV(sim,client,0)
-omni1.move_y(1,3)
-omni1.stop()
-omni1.move_x(1,3)
+# sim = client.require('sim')
+# dummy_object=sim.getObject('/dummy')
+# dummy_position = sim.getObjectPosition(dummy_object,sim.handle_world)
+# print(dummy_position)
+# sim.startSimulation()
+# omni1 = AGV(sim,client,0)
+# omni1.move_y(1,3)
+# omni1.stop()
+# omni1.move_x(1,3)
 
 # omni1.stop()
 # omni1.move_x(-2)

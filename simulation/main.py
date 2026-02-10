@@ -4,11 +4,11 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 # 시간 관련 함수를 사용하기 위해 time 모듈을 임포트합니다
 import time
 import random
-import requests
+# import requests
 from AGV  import AGV
 # Franka 로봇 제어 모듈 임포트
-from simulation.franka_robot import FrankaRobot
-
+# from simulation.franka_robot import FrankaRobot
+from franka_robot import FrankaRobot
 # CoppeliaSim과 통신할 RemoteAPIClient 객체를 생성합니다
 client = RemoteAPIClient()
 
@@ -21,68 +21,68 @@ client.setStepping(True)
 # 시뮬레이션을 시작합니다
 sim.startSimulation()
 
-def check_ppe_detection(server_url="13.125.121.143:8000"):
-    """
-    서버에 PPE 감지 요청을 보내고 결과를 받아옵니다.
+# def check_ppe_detection(server_url="13.125.121.143:8000"):
+#     """
+#     서버에 PPE 감지 요청을 보내고 결과를 받아옵니다.
 
-    Args:
-        server_url: 서버 URL (기본값: http://13.125.121.143:8000)
+#     Args:
+#         server_url: 서버 URL (기본값: http://13.125.121.143:8000)
 
-    Returns:
-        bool: 마스크 착용이 확인되면 True, 아니면 False
-    """
-    try:
-        print("\n" + "="*50)
-        print("PPE(마스크) 감지 시작...")
-        print("서버에 얼굴인식 요청 전송 중...")
+#     Returns:
+#         bool: 마스크 착용이 확인되면 True, 아니면 False
+#     """
+#     try:
+#         print("\n" + "="*50)
+#         print("PPE(마스크) 감지 시작...")
+#         print("서버에 얼굴인식 요청 전송 중...")
 
-        # 서버에 PPE 감지 요청 (POST 방식으로 트리거)
-        response = requests.post(
-            f"{server_url}/api/v1/ppe/check",
-            timeout=15  # 10초 타임아웃
-        )
+#         # 서버에 PPE 감지 요청 (POST 방식으로 트리거)
+#         response = requests.post(
+#             f"{server_url}/api/v1/ppe/check",
+#             timeout=15  # 10초 타임아웃
+#         )
 
-        if response.status_code == 200:
-            result = response.json()
-            print(f"서버 응답: {result}")
+#         if response.status_code == 200:
+#             result = response.json()
+#             print(f"서버 응답: {result}")
 
-            # 결과 확인
-            if result.get("status") == "success" and result.get("mask_detected"):
-                print("✅ 마스크 착용 확인! 시뮬레이션을 시작합니다.")
-                print("="*50 + "\n")
-                return True
-            else:
-                print("❌ 마스크 미착용 또는 감지 실패!")
-                print(f"사유: {result.get('message', '알 수 없음')}")
-                print("="*50 + "\n")
-                return False
-        else:
-            print(f"❌ 서버 오류: HTTP {response.status_code}")
-            print("="*50 + "\n")
-            return False
+#             # 결과 확인
+#             if result.get("status") == "success" and result.get("mask_detected"):
+#                 print("✅ 마스크 착용 확인! 시뮬레이션을 시작합니다.")
+#                 print("="*50 + "\n")
+#                 return True
+#             else:
+#                 print("❌ 마스크 미착용 또는 감지 실패!")
+#                 print(f"사유: {result.get('message', '알 수 없음')}")
+#                 print("="*50 + "\n")
+#                 return False
+#         else:
+#             print(f"❌ 서버 오류: HTTP {response.status_code}")
+#             print("="*50 + "\n")
+#             return False
 
-    except requests.exceptions.ConnectionError:
-        print("❌ 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.")
-        print("="*50 + "\n")
-        return False
-    except requests.exceptions.Timeout:
-        print("❌ 요청 시간 초과 (15초)")
-        print("="*50 + "\n")
-        return False
-    except Exception as e:
-        print(f"❌ 예상치 못한 오류: {e}")
-        print("="*50 + "\n")
-        return False
+#     except requests.exceptions.ConnectionError:
+#         print("❌ 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.")
+#         print("="*50 + "\n")
+#         return False
+#     except requests.exceptions.Timeout:
+#         print("❌ 요청 시간 초과 (15초)")
+#         print("="*50 + "\n")
+#         return False
+#     except Exception as e:
+#         print(f"❌ 예상치 못한 오류: {e}")
+#         print("="*50 + "\n")
+#         return False
 
 # 시뮬레이션 시작 메시지를 출력합니다
 print("시뮬레이션 시작 (Stepping 모드)")
 
 # ========== PPE(마스크) 감지 체크 ==========
 # 서버에 요청하여 마스크 착용 여부 확인
-if not check_ppe_detection():
-    print("\n⚠️  마스크 착용이 확인되지 않아 시뮬레이션을 종료합니다.")
-    sim.stopSimulation()
-    exit(1)
+# if not check_ppe_detection():
+#     print("\n⚠️  마스크 착용이 확인되지 않아 시뮬레이션을 종료합니다.")
+#     sim.stopSimulation()
+#     exit(1)
 
 # 시뮬레이션 안정화 대기 - stepping 모드에서는 직접 step 호출
 for _ in range(25):  # 0.5초 = 25 스텝 (0.02초 * 25)
@@ -159,7 +159,7 @@ place_counters = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
 # 각 키별 z축 레이어 오프셋 (9개 채워지면 0.1씩 증가)
 z_layer_offsets = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0}
 
-# 로봇별 담당 키 매핑 (0=양품도 Franka1이 처리)
+# 로봇별 담당 키 매핑 
 robot_config = [
     (franka1, r1proximsensor, 'Franka1', [1, 2]),
     (franka2, r2proximsensor, 'Franka2', [3, 4]),
@@ -215,7 +215,7 @@ try:
                         if place_counters[key] % 9 == 0:
                             z_layer_offsets[key] += 0.1
                             print(f"[{robot_name}] 키 {key}: 9개 완료! z 레이어 오프셋 → {z_layer_offsets[key]:.1f}")
-
+        
         # 컨베이어 센서 감지 로그
         if detectionState:
             if isinstance(detectedPoint, (list, tuple)) and len(detectedPoint) >= 3:
@@ -230,44 +230,43 @@ try:
             # cuboid 카운터를 증가시킵니다
             cuboidCount += 1
 
-
-            cuboidHandle = sim.createPrimitiveShape(3,
-                                                    [0.1,0.1,0.1],
-                                                    8)
-            sim.setShapeMass(cuboidHandle, 0.5)
-            # createPrimitiveShape는 기본 static → dynamic으로 전환
-            sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_static, 0)
-            sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_respondable, 1)
-            sim.resetDynamicObject(cuboidHandle)
+            control_signal = sim.getInt32Signal('cube_create')
+            if control_signal is not None:
+                cuboidHandle = control_signal
+            # sim.setShapeMass(cuboidHandle, 0.5)
+            # # createPrimitiveShape는 기본 static → dynamic으로 전환
+            # sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_static, 0)
+            # sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_respondable, 1)
+            # sim.resetDynamicObject(cuboidHandle)
             
 
-            # 생성된 cuboid의 위치를 설정합니다
-            # setObjectPosition(objectHandle, relativeToObjectHandle, position)
-            # relativeToObjectHandle: sim.handle_world는 월드 좌표계 기준을 의미합니다
-            sim.setObjectPosition(
-                cuboidHandle,           # 위치를 설정할 객체의 핸들
-                sim.handle_world,       # 월드 좌표계 기준
-                [6.325, -0.1, 0.8+0.3]    # 목표 위치 [x, y, z] (미터 단위)
-            )
+            # # 생성된 cuboid의 위치를 설정합니다
+            # # setObjectPosition(objectHandle, relativeToObjectHandle, position)
+            # # relativeToObjectHandle: sim.handle_world는 월드 좌표계 기준을 의미합니다
+            # sim.setObjectPosition(
+            #     cuboidHandle,           # 위치를 설정할 객체의 핸들
+            #     sim.handle_world,       # 월드 좌표계 기준
+            #     [6.325, -0.1, 0.8+0.3]    # 목표 위치 [x, y, z] (미터 단위)
+            # )
 
-            # cuboid를 proximity sensor가 감지할 수 있도록 설정합니다
-            # setObjectSpecialProperty로 객체의 특수 속성을 설정합니다
-            # sim.objectspecialproperty_detectable_all: 모든 센서 타입에 의해 감지 가능하게 설정
-            sim.setObjectSpecialProperty(
-                cuboidHandle,                                    # 대상 객체 핸들
-                sim.objectspecialproperty_detectable_all         # 모든 센서에 의해 감지 가능
-            )
+            # # cuboid를 proximity sensor가 감지할 수 있도록 설정합니다
+            # # setObjectSpecialProperty로 객체의 특수 속성을 설정합니다
+            # # sim.objectspecialproperty_detectable_all: 모든 센서 타입에 의해 감지 가능하게 설정
+            # sim.setObjectSpecialProperty(
+            #     cuboidHandle,                                    # 대상 객체 핸들
+            #     sim.objectspecialproperty_detectable_all         # 모든 센서에 의해 감지 가능
+            # )
 
             # 생성된 cuboid 핸들을 리스트에 추가합니다
             #랜덤으로 상품의 불량종류 및 양품값 추출하여 cuboid의 value값으로 저장
             #0번은 양품 1~6은 불량종류
-            rand_product = random.randint(0,6)
-            print(rand_product)
-            createdCuboids[cuboidHandle]=rand_product
-            print(createdCuboids)
+                rand_product = random.randint(0,6)
+                print(rand_product)
+                createdCuboids[cuboidHandle]=rand_product
+                print(createdCuboids)
 
             # 마지막 생성 시간을 현재 시간으로 업데이트합니다
-            lastCuboidTime = currentTime
+                lastCuboidTime = currentTime
 
         
         # 시뮬레이션 스텝 진행 (5 스텝 = 0.1초)
