@@ -37,6 +37,7 @@ class FrankaRobot:
 
         # 로봇 핸들 가져오기
         self.base_handle = sim.getObject(robot_path)
+        
         self.joint_handles = self._get_joints()
 
         # Target dummy 가져오기 (CoppeliaSim 내부 스크립트에서 IK 처리)
@@ -62,12 +63,13 @@ class FrankaRobot:
             self.IK_status_object = "Franka1"
         elif robot_path == "/Franka[2]":
             self.IK_status_object = "Franka2"
-
+        sim.setInt32Signal(self.IK_status_object,1)
         # 조인트 동적 제어 모드 설정 및 속도 제한
         self._setup_joint_control()
-        
+        # IK 신호가 CoppeliaSim에 반영되도록 시뮬레이션 스텝 진행
+        self._step_simulation(5)
 
-        print(f"[FrankaRobot] 초기화 완료: {robot_path}")
+        print(f"[FrankaRobot] 초기화 완료: {robot_path}, IK Signal: '{self.IK_status_object}'")
         print(f"[FrankaRobot] Target Dummy 위치: {[round(v, 3) for v in self.initial_tip_position]}")
 
     def _setup_joint_control(self):
@@ -278,6 +280,7 @@ class FrankaRobot:
         # force_sensor가 있으면 force_sensor에, 없으면 target_dummy에 부착
         parent_handle = self.force_sensor if self.force_sensor else self.target_dummy
         self.sim.setObjectParent(block_handle, parent_handle, True)
+        self.sim.setObjectParent(self.target_dummy,parent_handle,True)
         print("[FrankaRobot] 블록 파지 완료")
 
     def release(self, block_handle):
@@ -289,7 +292,7 @@ class FrankaRobot:
         """
         # 부모에서 분리
         self.sim.setObjectParent(block_handle, -1, True)
-
+        
         # dynamic + respondable 복원
         self.sim.setObjectInt32Param(
             block_handle, self.sim.shapeintparam_static, 0
@@ -300,7 +303,7 @@ class FrankaRobot:
         self.sim.resetDynamicObject(block_handle)
         print("[FrankaRobot] 블록 놓기 완료")
 
-    def return_to_initial_pose(self, speed=2.0):
+    def return_to_initial_pose(self, speed=5.0):
         """초기 dummy 위치/자세로 복귀"""
         self.move_to_position(self.initial_tip_position, speed=speed, ease_type='smooth')
 
@@ -481,29 +484,49 @@ class FrankaRobot:
         angle_rad = math.radians(angle_deg)
         joint1 = self.joint_handles[0]
 
-        # 현재 조인트 위치에서 목표 각도까지 점진적으로 이동
-        current_angle = self.sim.getJointPosition(joint1)
-        target_angle = angle_rad
+        # # 현재 조인트 위치에서 목표 각도까지 점진적으로 이동
+        # current_angle = self.sim.getJointPosition(joint1)
+        # target_angle = angle_rad
 
         # 스텝 수 계산 (부드러운 회전을 위해)
-        steps = 20
-        for step in range(1, steps + 1):
-            t = step / steps
-            interp_angle = current_angle + (target_angle - current_angle) * t
-            self.sim.setJointTargetPosition(joint1, interp_angle)
-            self._step_simulation(1)
+        # steps = 20
+        # for step in range(1, steps + 1):
+        #     t = step / steps
+        #     interp_angle = current_angle + (target_angle - current_angle) * t
+        self.sim.setJointTargetVelocity(joint1, 10)
+        self.sim.setJointTargetPosition(joint1, angle_rad)
+        self._step_simulation(1)
 
         # 회전 후 dummy 위치를 force_sensor 위치로 동기화
-        if self.force_sensor:
-            new_pos = self.sim.getObjectPosition(self.force_sensor, self.sim.handle_world)
-            new_ori = self.sim.getObjectOrientation(self.force_sensor, self.sim.handle_world)
-            self.sim.setObjectPosition(self.target_dummy, new_pos, self.sim.handle_world)
-            self.sim.setObjectOrientation(self.target_dummy, new_ori, self.sim.handle_world)
-            self._step_simulation(5)
+        # if self.force_sensor:
+        #     new_pos = self.sim.getObjectPosition(self.force_sensor, self.sim.handle_world)
+        #     new_ori = self.sim.getObjectOrientation(self.force_sensor, self.sim.handle_world)
+        #     self.sim.setObjectPosition(self.target_dummy, new_pos, self.sim.handle_world)
+        #     self.sim.setObjectOrientation(self.target_dummy, new_ori, self.sim.handle_world)
+        #     self._step_simulation(5)
 
         print(f"[FrankaRobot] 조인트1 회전 완료: {angle_deg}도, dummy 동기화됨")
         
-    # def init_position()
+    def init_position(self):
+        joint_object = []
+        for i in range(1,8):
+            if i ==1:
+                joint_object.append(self.sim.getObject(f'{self.robot_path}/joint'))
+            else:
+                joint_object.append(self.sim.getObject(f'{self.robot_path}/link{i}_resp/joint'))
+        init_joint_position =[
+        0.0,
+        0.0027901289148699604,
+        0.0,
+        -1.570796326795,
+        0.00039487721939757137,
+        1.5707476795084223,
+        -1.7763568394002505e-15]
+        for i in range(len(joint_object)):
+            # print(self.sim.getJointPosition(joint_object[i]))
+            self.sim.setJointTargetPosition(joint_object[i],init_joint_position[i])
+        
+
 
     def pick_and_place(self, block_handle, block_pos, place_pos, place_drop_z=-0.25, cuboid_Count=0, block_number=0):
         """
@@ -520,6 +543,8 @@ class FrankaRobot:
         self.is_busy = True
 
         try:
+            self.sim.setInt32Signal(self.IK_status_object,1)
+            self._step_simulation(1)
             # 1) 블록으로 접근 (블록 바로 위 0.08m)
             print(f"[FrankaRobot] 블록 접근 시작")
             block_pos = self.direct_approach_to_object(
@@ -544,12 +569,14 @@ class FrankaRobot:
 
             # 4) 불량 종류에 따라 첫 번째 조인트 회전 (IK 실패 방지)
             self.sim.setInt32Signal(self.IK_status_object,0)
+           
             if block_number in [1, 3, 5]:
                 print(f"[FrankaRobot] 불량 {block_number}: 조인트1 +90도 회전")
                 self.rotate_joint1(90)
             elif block_number in [2, 4, 6]:
                 print(f"[FrankaRobot] 불량 {block_number}: 조인트1 -90도 회전")
                 self.rotate_joint1(-90)
+            self.sim.setObjectParent(self.target_dummy, -1, True)
             self.sim.setInt32Signal(self.IK_status_object, 1)
             
             # 5) 목표 위치로 이동
@@ -570,13 +597,15 @@ class FrankaRobot:
             # 7) 약간 후퇴(위로)
             retreat_pos = [drop_pos[0], drop_pos[1], drop_pos[2] + 0.3]
             self.ascend_to_position(retreat_pos, speed=0.5)
-            
+            print("후퇴")
             
             self.sim.setInt32Signal(self.IK_status_object,0)
-            
-            self.sim.setInt32Signal(self.IK_status_object,1)
+            self.init_position()
+            print("초기위치로 복귀")
+            # self._step_simulation(4)
+            self.return_to_initial_pose()
             # 8) 초기 자세 복귀
-            self.return_to_initial_pose(speed=2.0)
+
 
             print("[FrankaRobot] 픽앤플레이스 완료")
 
