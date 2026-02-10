@@ -107,12 +107,12 @@ r1proximsensor = sim.getObject('/Franka[0]/proximitySensor')
 r2proximsensor = sim.getObject('/Franka[1]/proximitySensor')
 r3proximsensor = sim.getObject('/Franka[2]/proximitySensor')
 # 센서 핸들을 성공적으로 가져왔음을 출력합니다
-print(f"Proximity Sensor 핸들: {proximSensorHandle}")
-print(f"r1핸들 성공")
+# print(f"Proximity Sensor 핸들: {proximSensorHandle}")
+# print(f"r1핸들 성공")
 
 # 센서의 현재 위치를 확인합니다 (디버깅용)
 sensorPosition = sim.getObjectPosition(proximSensorHandle, sim.handle_world)
-print(f"Proximity Sensor 위치: x={sensorPosition[0]:.3f}, y={sensorPosition[1]:.3f}, z={sensorPosition[2]:.3f}")
+# print(f"Proximity Sensor 위치: x={sensorPosition[0]:.3f}, y={sensorPosition[1]:.3f}, z={sensorPosition[2]:.3f}")
 
 # 생성된 cuboid 객체들을 저장할 리스트를 초기화합니다
 createdCuboids = {}
@@ -161,11 +161,11 @@ z_layer_offsets = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0}
 
 # 로봇별 담당 키 매핑 
 robot_config = [
-    (franka1, r1proximsensor, 'Franka1', [1, 2]),
-    (franka2, r2proximsensor, 'Franka2', [3, 4]),
-    (franka3, r3proximsensor, 'Franka3', [5, 6]),
+    (franka1, r1proximsensor, 'Franka0', [1, 2]),
+    (franka2, r2proximsensor, 'Franka1', [3, 4]),
+    (franka3, r3proximsensor, 'Franka2', [5, 6]),
 ]
-
+multi_interrupt = ''
 # 메인 루프: 무한 반복하면서 센서 값을 읽고 cuboid를 생성합니다
 try:
     # 무한 루프를 시작합니다
@@ -189,7 +189,7 @@ try:
                     # 블록 번호가 이 로봇의 담당 키에 해당하는지 확인
                     if block_number in assigned_keys:
                         block_pos = sim.getObjectPosition(detected_handle, sim.handle_world)
-                        print(f"[{robot_name}] 블록 감지! 핸들={detected_handle}, 번호={block_number}, 위치={[round(v,3) for v in block_pos]}")
+                        # print(f"[{robot_name}] 블록 감지! 핸들={detected_handle}, 번호={block_number}, 위치={[round(v,3) for v in block_pos]}")
                         processed_blocks.add(detected_handle)
 
                         key = block_number
@@ -214,25 +214,25 @@ try:
                         place_counters[key] += 1
                         if place_counters[key] % 9 == 0:
                             z_layer_offsets[key] += 0.1
-                            print(f"[{robot_name}] 키 {key}: 9개 완료! z 레이어 오프셋 → {z_layer_offsets[key]:.1f}")
+                            # print(f"[{robot_name}] 키 {key}: 9개 완료! z 레이어 오프셋 → {z_layer_offsets[key]:.1f}")
         
         # 컨베이어 센서 감지 로그
         if detectionState:
             if isinstance(detectedPoint, (list, tuple)) and len(detectedPoint) >= 3:
                 distance = (detectedPoint[0]**2 + detectedPoint[1]**2 + detectedPoint[2]**2)**0.5
-                print(f"[센서] 객체 감지! 거리: {distance:.4f}m")
-            else:
-                print(f"[센서] 객체 감지! 거리: {detectedPoint:.4f}m")
+                # print(f"[센서] 객체 감지! 거리: {distance:.4f}m")
+
 
         # ========== Cuboid 생성 (2초마다) ==========
         # 마지막 생성 이후 2초가 경과했는지 확인합니다
-        if currentTime - lastCuboidTime >= 10.0:
+        if currentTime - lastCuboidTime >= 5.0:
             # cuboid 카운터를 증가시킵니다
             cuboidCount += 1
 
             control_signal = sim.getInt32Signal('cube_create')
-            if control_signal is not None:
+            if control_signal is not None and multi_interrupt!= control_signal:
                 cuboidHandle = control_signal
+            
             # sim.setShapeMass(cuboidHandle, 0.5)
             # # createPrimitiveShape는 기본 static → dynamic으로 전환
             # sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_static, 0)
@@ -260,14 +260,16 @@ try:
             # 생성된 cuboid 핸들을 리스트에 추가합니다
             #랜덤으로 상품의 불량종류 및 양품값 추출하여 cuboid의 value값으로 저장
             #0번은 양품 1~6은 불량종류
+
                 rand_product = random.randint(0,6)
-                print(rand_product)
+                # print(rand_product)
                 createdCuboids[cuboidHandle]=rand_product
                 print(createdCuboids)
+            
 
             # 마지막 생성 시간을 현재 시간으로 업데이트합니다
                 lastCuboidTime = currentTime
-
+            multi_interrupt = cuboidHandle
         
         # 시뮬레이션 스텝 진행 (5 스텝 = 0.1초)
         for _ in range(5):
@@ -286,6 +288,7 @@ finally:
     franka2.cleanup()
     franka3.cleanup()
     # 시뮬레이션을 중지합니다
+
     sim.stopSimulation()
 
     # 최종 종료 메시지를 출력합니다
