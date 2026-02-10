@@ -1,6 +1,8 @@
 # Training
 training/ppe_detection/datasets/
 training/ppe_detection/runs/
+training/classification/datasets/
+training/classification/runs/
 *.pt
 
 # Python

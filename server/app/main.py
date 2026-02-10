@@ -9,7 +9,7 @@ import uuid
 load_dotenv()
 
 # 라우터 임포트
-from .routers import ppe
+from .routers import ppe, defect
 
 app = FastAPI(
     title="Smart Factory API",
@@ -36,8 +36,9 @@ async def verify_api_key(x_api_key: str = Header(...)):
     return x_api_key
 
 
-# PPE 라우터 등록
+# 라우터 등록
 app.include_router(ppe.router)
+app.include_router(defect.router)
 
 # 이미지 저장 디렉토리
 UPLOAD_DIR = "uploaded_images"
