@@ -54,9 +54,18 @@ class FrankaRobot:
         self.initial_joint_positions = [
             sim.getJointPosition(j) for j in self.joint_handles
         ]
+        if robot_path == "/Franka[0]":
+            
+            self.IK_status_object = "Franka0"
+        elif robot_path == "/Franka[1]":
+            
+            self.IK_status_object = "Franka1"
+        elif robot_path == "/Franka[2]":
+            self.IK_status_object = "Franka2"
 
         # 조인트 동적 제어 모드 설정 및 속도 제한
         self._setup_joint_control()
+        
 
         print(f"[FrankaRobot] 초기화 완료: {robot_path}")
         print(f"[FrankaRobot] Target Dummy 위치: {[round(v, 3) for v in self.initial_tip_position]}")
@@ -493,6 +502,8 @@ class FrankaRobot:
             self._step_simulation(5)
 
         print(f"[FrankaRobot] 조인트1 회전 완료: {angle_deg}도, dummy 동기화됨")
+        
+    # def init_position()
 
     def pick_and_place(self, block_handle, block_pos, place_pos, place_drop_z=-0.25, cuboid_Count=0, block_number=0):
         """
@@ -532,19 +543,20 @@ class FrankaRobot:
             self.ascend_to_position(lift_pos, speed=0.5)
 
             # 4) 불량 종류에 따라 첫 번째 조인트 회전 (IK 실패 방지)
-            # if block_number in [1, 3, 5]:
-            #     print(f"[FrankaRobot] 불량 {block_number}: 조인트1 +90도 회전")
-            #     self.rotate_joint1(90)
-            # elif block_number in [2, 4, 6]:
-            #     print(f"[FrankaRobot] 불량 {block_number}: 조인트1 -90도 회전")
-            #     self.rotate_joint1(-90)
-
-            # self._step_simulation(2)
+            self.sim.setInt32Signal(self.IK_status_object,0)
+            if block_number in [1, 3, 5]:
+                print(f"[FrankaRobot] 불량 {block_number}: 조인트1 +90도 회전")
+                self.rotate_joint1(90)
+            elif block_number in [2, 4, 6]:
+                print(f"[FrankaRobot] 불량 {block_number}: 조인트1 -90도 회전")
+                self.rotate_joint1(-90)
+            self.sim.setInt32Signal(self.IK_status_object, 1)
+            
             # 5) 목표 위치로 이동
             index = cuboid_Count % 9
             target_place = place_pos[index]
             print(f"[FrankaRobot] 목표 위치 이동: {[round(v, 3) for v in target_place]}")
-            self.move_to_position_fast(target_place, max_speed=1.0)
+            self.move_to_position_fast(target_place, max_speed=2.0)
 
             # 5) z 방향 하강
             drop_pos = [target_place[0], target_place[1], target_place[2] + place_drop_z]
@@ -555,20 +567,16 @@ class FrankaRobot:
             self.release(block_handle)
 
             # 잠시 대기 (블록 안정화)
-            self._step_simulation(1)
             # 7) 약간 후퇴(위로)
             retreat_pos = [drop_pos[0], drop_pos[1], drop_pos[2] + 0.3]
             self.ascend_to_position(retreat_pos, speed=0.5)
             
-            # if block_number in [1, 3, 5]:
-            #     print(f"[FrankaRobot] 불량 {block_number}: 조인트1 +90도 회전")
-            #     self.rotate_joint1(0)
-            # elif block_number in [2, 4, 6]:
-            #     print(f"[FrankaRobot] 불량 {block_number}: 조인트1 -90도 회전")
-            #     self.rotate_joint1(0)
-
+            
+            self.sim.setInt32Signal(self.IK_status_object,0)
+            
+            self.sim.setInt32Signal(self.IK_status_object,1)
             # 8) 초기 자세 복귀
-            self.return_to_initial_pose(speed=1.0)
+            self.return_to_initial_pose(speed=2.0)
 
             print("[FrankaRobot] 픽앤플레이스 완료")
 
