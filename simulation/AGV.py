@@ -1,5 +1,4 @@
 
-from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import math
 class AGV:
     v=80*2.398795*math.pi/180
@@ -18,7 +17,7 @@ class AGV:
                 self.omniPads.append(self.sim.getObject(f'/OmniPlatform[{self.robot_num}]/link[{i}]/regularRotation'))
     
         self.omniPads.append(self.sim.getObject(f"/OmniPlatform[{self.robot_num}]"))
-        
+        self.init_position = self.getObjectPosition(self.omniPads[4])        
     def get_position(self):
         return self.sim.getObjectPosition(self.omniPads[4])
         
@@ -85,36 +84,13 @@ class AGV:
                 update_position = self.get_position()[1]
         self.stop()
 
-        
-    
-    
-
-# client = RemoteAPIClient()
-
-# sim = client.require('sim')
-# dummy_object=sim.getObject('/dummy')
-# dummy_position = sim.getObjectPosition(dummy_object,sim.handle_world)
-# print(dummy_position)
-# sim.startSimulation()
-# omni1 = AGV(sim,client,0)
-# omni1.move_y(1,3)
-# omni1.stop()
-# omni1.move_x(1,3)
-
-# omni1.stop()
-# omni1.move_x(-2)
-# omni1.move_y(2,2)
-# omni1.stop()
-# omni1.move_left(1)
-# omni1.move_backward(1)
-# omni1.move_forward(2)
-# omni1.stop()
-# omniPads=[]
-# for i in range(4):
-#     if i == 0:
-#         omniPads.append(sim.getObject('/OmniPlatform[6]/regularRotation'))
-#     else:
-#         omniPads.append(sim.getObject(f'/OmniPlatform[6]/link[{i}]/regularRotation'))
-
-# v=80*2.398795*math.pi/180*5
-# #move left
+    def transfer_to_rack(self, block_handles, rack_dummy_handle):
+        dummy_pos = self.sim.getObjectPosition(rack_dummy_handle, self.sim.handle_world)
+        for i, handle in enumerate(block_handles):
+            offset_x = (i % 3) * 0.08
+            offset_y = (i // 3) * 0.08
+            pos = [dummy_pos[0] + offset_x, dummy_pos[1] + offset_y, dummy_pos[2]]
+            self.sim.setObjectPosition(handle, pos, self.sim.handle_world)
+            self.sim.setObjectInt32Param(handle, self.sim.shapeintparam_static, 1)
+            self.sim.setObjectInt32Param(handle, self.sim.shapeintparam_respondable, 1)
+            self.sim.setObjectParent(handle, rack_dummy_handle, True)
