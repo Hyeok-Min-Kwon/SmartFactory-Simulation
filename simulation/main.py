@@ -3,8 +3,9 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 # 시간 관련 함수를 사용하기 위해 time 모듈을 임포트합니다
 import time
-import random
 # import requests
+# 이미지 분류 모듈 임포트
+from imageSending import get_product_label
 from AGV  import AGV
 # Franka 로봇 제어 모듈 임포트
 # from simulation.franka_robot import FrankaRobot
@@ -25,13 +26,13 @@ sim = client.require('sim')
 # 시뮬레이션 stepping 모드 활성화 (로봇 부드러운 움직임을 위해 필수)
 client.setStepping(True)
 
-# 시뮬레이션을 시작합니다
-if check_ppe_detection():
-    sim.startSimulation()
-else : 
-    raise KeyError
+# # 시뮬레이션을 시작합니다
+# if check_ppe_detection():
+#     sim.startSimulation()
+# else : 
+#     raise KeyError
 
-
+sim.startSimulation()
 # 시뮬레이션 시작 메시지를 출력합니다
 print("시뮬레이션 시작 (Stepping 모드)")
 
@@ -52,16 +53,16 @@ franka2 = FrankaRobot(sim, client, '/Franka[1]')
 franka3 = FrankaRobot(sim, client, '/Franka[2]')
 
 
-#AGV 등록
-agv1= AGV(sim, client, 0)
-agv1.stop()
+# #AGV 등록
+# agv1= AGV(sim, client, 0)
+# agv1.stop()
 
-# AGV 최적화기 등록
-agv_optimizer = AGVPickupOptimizer(sim=sim, agv_capacity=100, trigger_count=10)
+# # AGV 최적화기 등록
+# agv_optimizer = AGVPickupOptimizer(sim=sim, agv_capacity=100, trigger_count=10)
 
-# AGV 상태 관리
-agv_busy = False  # AGV가 작업 중인지 여부
-agv_home_position = (3.0, -2.0)  # AGV 대기 위치 (필요시 수정)
+# # AGV 상태 관리
+# agv_busy = False  # AGV가 작업 중인지 여부
+# agv_home_position = (3.0, -2.0)  # AGV 대기 위치 (필요시 수정)
 # 이미 처리한 블록을 추적하는 집합
 processed_blocks = set()
 
@@ -193,87 +194,88 @@ try:
                 distance = (detectedPoint[0]**2 + detectedPoint[1]**2 + detectedPoint[2]**2)**0.5
                 # print(f"[센서] 객체 감지! 거리: {distance:.4f}m")
 
-        # ========== AGV 트리거 감지 및 최적화 실행 ==========
-        if not agv_busy:
-            # 10개 이상 도달한 상자 확인 (분류 1~6만 체크)
-            box_counts = {k: v for k, v in place_counters.items() if k >= 1}
-            triggered_boxes = agv_optimizer.check_trigger(box_counts)
+        # # ========== AGV 트리거 감지 및 최적화 실행 ==========
+        # if not agv_busy:
+        #     # 10개 이상 도달한 상자 확인 (분류 1~6만 체크)
+        #     box_counts = {k: v for k, v in place_counters.items() if k >= 1}
+        #     triggered_boxes = agv_optimizer.check_trigger(box_counts)
 
-            if triggered_boxes:
-                print(f"\n[AGV 트리거] 상자 {triggered_boxes}가 10개 이상 도달!")
-                agv_busy = True
+        #     if triggered_boxes:
+        #         print(f"\n[AGV 트리거] 상자 {triggered_boxes}가 10개 이상 도달!")
+        #         agv_busy = True
 
-                # AGV 현재 위치 가져오기
-                agv_pos = agv1.get_position()
-                agv_start = (agv_pos[0], agv_pos[1])
+        #         # AGV 현재 위치 가져오기
+        #         agv_pos = agv1.get_position()
+        #         agv_start = (agv_pos[0], agv_pos[1])
 
-                # 최적화 실행
-                optimization_result = agv_optimizer.optimize_pickup(
-                    box_counts=box_counts,
-                    triggered_boxes=triggered_boxes,
-                    agv_start=agv_start
-                )
+        #         # 최적화 실행
+        #         optimization_result = agv_optimizer.optimize_pickup(
+        #             box_counts=box_counts,
+        #             triggered_boxes=triggered_boxes,
+        #             agv_start=agv_start
+        #         )
 
-                print(f"[AGV 최적화 결과]")
-                print(f"  - 픽업 계획: {optimization_result['pickup_plan']}")
-                print(f"  - 상자 방문 순서: {optimization_result['pickup_order']}")
-                print(f"  - 보관장소 방문 순서: {optimization_result['delivery_order']}")
-                print(f"  - 총 적재 물품: {optimization_result['total_items']}개")
-                print(f"  - 총 적재 크기: {optimization_result['total_size']}/{agv_optimizer.agv_capacity} (잔여: {optimization_result['remaining_capacity']})")
-                print(f"  - 예상 이동 거리: {optimization_result['total_distance']:.2f}m")
+        #         print(f"[AGV 최적화 결과]")
+        #         print(f"  - 픽업 계획: {optimization_result['pickup_plan']}")
+        #         print(f"  - 상자 방문 순서: {optimization_result['pickup_order']}")
+        #         print(f"  - 보관장소 방문 순서: {optimization_result['delivery_order']}")
+        #         print(f"  - 총 적재 물품: {optimization_result['total_items']}개")
+        #         print(f"  - 총 적재 크기: {optimization_result['total_size']}/{agv_optimizer.agv_capacity} (잔여: {optimization_result['remaining_capacity']})")
+        #         print(f"  - 예상 이동 거리: {optimization_result['total_distance']:.2f}m")
 
-                # 경로 명령 생성
-                route_commands = agv_optimizer.get_full_route(optimization_result)
+        #         # 경로 명령 생성
+        #         route_commands = agv_optimizer.get_full_route(optimization_result)
 
-                # 픽업/하차 시 카운터 업데이트 콜백
-                def on_pickup(category, count):
-                    # 상자에서 물품을 가져가면 카운터 감소
-                    place_counters[category] -= count
-                    if place_counters[category] < 0:
-                        place_counters[category] = 0
-                    print(f"  [카운터 업데이트] 분류 {category}: {place_counters[category]}개 남음")
+        #         # 픽업/하차 시 카운터 업데이트 콜백
+        #         def on_pickup(category, count):
+        #             # 상자에서 물품을 가져가면 카운터 감소
+        #             place_counters[category] -= count
+        #             if place_counters[category] < 0:
+        #                 place_counters[category] = 0
+        #             print(f"  [카운터 업데이트] 분류 {category}: {place_counters[category]}개 남음")
 
-                def on_dropoff(category, count):
-                    # 보관장소에 물품 하차 (필요시 추가 로직)
-                    pass
+        #         def on_dropoff(category, count):
+        #             # 보관장소에 물품 하차 (필요시 추가 로직)
+        #             pass
 
-                # AGV 경로 수행
-                agv1.execute_route(route_commands, on_pickup=on_pickup, on_dropoff=on_dropoff)
+        #         # AGV 경로 수행
+        #         agv1.execute_route(route_commands, on_pickup=on_pickup, on_dropoff=on_dropoff)
 
-                # 홈 위치로 복귀
-                print(f"[AGV] 대기 위치로 복귀 중...")
-                agv1.move_to_position(agv_home_position[0], agv_home_position[1], speed=2)
+        #         # 홈 위치로 복귀
+        #         print(f"[AGV] 대기 위치로 복귀 중...")
+        #         agv1.move_to_position(agv_home_position[0], agv_home_position[1], speed=2)
 
-                agv_busy = False
-                print(f"[AGV] 작업 완료. 현재 상자 현황: {place_counters}\n")
+        #         agv_busy = False
+        #         print(f"[AGV] 작업 완료. 현재 상자 현황: {place_counters}\n")
 
-        # ========== Cuboid 생성 (2초마다) ==========
-        # 마지막 생성 이후 2초가 경과했는지 확인합니다
-        if currentTime - lastCuboidTime >= 5.0:
+        # ========== Cuboid 생성 (10초마다) ==========
+        # 마지막 생성 이후 10초가 경과했는지 확인합니다
+        if currentTime - lastCuboidTime >= 15.0:
             control_signal = sim.getInt32Signal('cube_create')
             if control_signal is not None and multi_interrupt != control_signal:
                 cuboidHandle = control_signal
                 cuboidCount += 1
-                rand_product = random.randint(0, 6)
+                # 서버에 이미지 전송하여 분류 결과 받기 (0~5)
+                rand_product = get_product_label()
                 createdCuboids[cuboidHandle] = rand_product
                 print(createdCuboids)
                 lastCuboidTime = currentTime
             multi_interrupt = cuboidHandle
 
-        # ========== AGV 이송 체크 (불량별 5개 이상이면 rack으로 이송) ==========
-        for defect_key in range(1, 7):
-            if len(box_data[defect_key]) >= 5:
-                rack_idx = defect_to_rack[defect_key]
-                dummy_handle = rack_dummies[rack_idx]
-                transfer_count = len(box_data[defect_key])
-                """
-                최적화 알고리즘 들어가서 물체를 옮긴 후 아래 transfer_to_rack으로 물체를 옮김
-                """
-                agv1.transfer_to_rack(box_data[defect_key], dummy_handle)
-                box_data[defect_key] = []
-                place_counters[defect_key] = 0
-                z_layer_offsets[defect_key] = 0.0
-                print(f"[AGV] 불량{defect_key} 블록 {transfer_count}개 rack[{rack_idx}]로 이송 완료, 데이터 초기화")
+        # # ========== AGV 이송 체크 (불량별 5개 이상이면 rack으로 이송) ==========
+        # for defect_key in range(1, 7):
+        #     if len(box_data[defect_key]) >= 5:
+        #         rack_idx = defect_to_rack[defect_key]
+        #         dummy_handle = rack_dummies[rack_idx]
+        #         transfer_count = len(box_data[defect_key])
+        #         """
+        #         최적화 알고리즘 들어가서 물체를 옮긴 후 아래 transfer_to_rack으로 물체를 옮김
+        #         """
+        #         agv1.transfer_to_rack(box_data[defect_key], dummy_handle)
+        #         box_data[defect_key] = []
+        #         place_counters[defect_key] = 0
+        #         z_layer_offsets[defect_key] = 0.0
+        #         print(f"[AGV] 불량{defect_key} 블록 {transfer_count}개 rack[{rack_idx}]로 이송 완료, 데이터 초기화")
 
         # ========== 모든 로봇 업데이트 + 시뮬레이션 스텝 (동시 작업) ==========
         for robot, _, _, _ in robot_config:
