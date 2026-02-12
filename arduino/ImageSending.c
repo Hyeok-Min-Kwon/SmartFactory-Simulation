@@ -1,12 +1,20 @@
 #include <WiFi.h>
-#include <WebServer.h>
+#include <HTTPClient.h>
 #include "esp_camera.h"
+#include "constants.h"
 
 // WiFi 설정
-//const char* ssid = "";       
+//const char* ssid = "";
 //const char* password = "";
 
-WebServer server(80);
+// 서버 설정
+const char* serverUrl = "http://13.125.121.143:8000";
+const char* captureCheckEndpoint = "/capture-request";  // 사진 요청 확인 엔드포인트
+const char* uploadEndpoint = "/upload";                  // 사진 업로드 엔드포인트
+
+// 폴링 간격 (밀리초)
+unsigned long lastPollTime = 0;
+const unsigned long pollInterval = 2000;  // 2초마다 서버 확인
 
 // 카메라 핀 설정
 #define PWDN_GPIO_NUM     32
@@ -65,52 +73,66 @@ void initCamera() {
   Serial.println("✅ Camera initialized successfully");
 }
 
-void handleRoot() {
-  String html = "<html><body style='font-family: Arial;'>";
-  html += "<h1>ESP32-CAM Test</h1>";
-  html += "<p><a href='/capture'><button style='padding:15px 30px; font-size:18px;'>📸 Capture Photo</button></a></p>";
-  html += "<p><img src='/stream' width='640' height='480'></p>";
-  html += "</body></html>";
-  
-  server.send(200, "text/html", html);
+// 서버에 사진 요청이 있는지 확인
+bool checkCaptureRequest() {
+  HTTPClient http;
+  String url = String(serverUrl) + String(captureCheckEndpoint);
+
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode == 200) {
+    String response = http.getString();
+    http.end();
+    // 서버에서 "true" 또는 "1"을 반환하면 사진 촬영
+    if (response == "true" || response == "1") {
+      return true;
+    }
+  } else {
+    Serial.printf("Check request failed, code: %d\n", httpCode);
+  }
+
+  http.end();
+  return false;
 }
 
-void handleCapture() {
-  Serial.println("\n📸 Capture request received");
-  
+// 사진 촬영 후 서버로 업로드
+bool captureAndUpload() {
+  Serial.println("\n📸 Capture request from server");
+
   unsigned long start = millis();
-  
+
   // 이미지 촬영
   camera_fb_t * fb = esp_camera_fb_get();
-  if(!fb) {
+  if (!fb) {
     Serial.println("❌ Camera capture failed");
-    server.send(500, "text/plain", "Camera Error");
-    return;
+    return false;
   }
-  
-  unsigned long elapsed = millis() - start;
-  
+
+  unsigned long captureTime = millis() - start;
   Serial.printf("✅ Photo captured!\n");
   Serial.printf("   Size: %d bytes\n", fb->len);
-  Serial.printf("   Time: %lu ms\n", elapsed);
-  
-  // JPEG 이미지 전송
-  server.sendHeader("Content-Disposition", "inline; filename=capture.jpg");
-  server.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
-  
-  esp_camera_fb_return(fb);
-  
-  Serial.println("   Image sent to client\n");
-}
+  Serial.printf("   Capture time: %lu ms\n", captureTime);
 
-void handleStream() {
-  // 실시간 미리보기용
-  camera_fb_t * fb = esp_camera_fb_get();
-  if(fb) {
-    server.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
-    esp_camera_fb_return(fb);
+  // 서버로 이미지 업로드
+  HTTPClient http;
+  String url = String(serverUrl) + String(uploadEndpoint);
+
+  http.begin(url);
+  http.addHeader("Content-Type", "image/jpeg");
+
+  int httpCode = http.POST(fb->buf, fb->len);
+
+  esp_camera_fb_return(fb);
+
+  if (httpCode == 200) {
+    Serial.println("✅ Image uploaded successfully");
+    http.end();
+    return true;
   } else {
-    server.send(500, "text/plain", "Stream Error");
+    Serial.printf("❌ Upload failed, code: %d\n", httpCode);
+    http.end();
+    return false;
   }
 }
 
@@ -118,12 +140,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n\n🚀 ESP32-CAM Starting...");
   Serial.println("================================");
-  
+
   // WiFi 연결
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  WiFi.setSleep(false); 
-  
+  WiFi.setSleep(false);
+
   Serial.print("Connecting to WiFi");
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -131,8 +153,8 @@ void setup() {
     Serial.print(".");
     attempts++;
   }
-  
-  if(WiFi.status() == WL_CONNECTED) {
+
+  if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n✅ WiFi Connected!");
     Serial.print("📍 IP Address: ");
     Serial.println(WiFi.localIP());
@@ -142,23 +164,33 @@ void setup() {
     Serial.println("Check SSID and Password");
     return;
   }
-  
+
   // 카메라 초기화
   initCamera();
-  
-  // 웹서버 설정
-  server.on("/", handleRoot);
-  server.on("/capture", handleCapture);
-  server.on("/stream", handleStream);
-  
-  server.begin();
-  
+
   Serial.println("================================");
-  Serial.println("🌐 Web Server Started");
-  Serial.printf("Access at: http://%s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("🌐 Server: %s\n", serverUrl);
+  Serial.println("Waiting for capture requests...");
   Serial.println("================================\n");
 }
 
 void loop() {
-  server.handleClient();
+  unsigned long currentTime = millis();
+
+  // 폴링 간격마다 서버 확인
+  if (currentTime - lastPollTime >= pollInterval) {
+    lastPollTime = currentTime;
+
+    // WiFi 연결 확인
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi disconnected, reconnecting...");
+      WiFi.reconnect();
+      return;
+    }
+
+    // 서버에 사진 요청이 있는지 확인
+    if (checkCaptureRequest()) {
+      captureAndUpload();
+    }
+  }
 }
