@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, Header, HTTPException, Depends
+from fastapi import FastAPI, File, UploadFile, Form, Header, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
@@ -135,3 +135,93 @@ async def test_api_key():
         "status": "success",
         "message": "API Key is valid! ✅"
     }
+
+
+# ============================================
+# Arduino (ESP32-CAM) 전용 엔드포인트
+# ============================================
+
+# 캡처 요청 상태 플래그
+_capture_requested = False
+
+@app.get("/capture-request")
+def check_capture_request():
+    """
+    ESP32가 폴링하여 사진 촬영 요청 확인
+    - "true" 반환 시 사진 촬영
+    - 요청 확인 후 플래그 자동 리셋
+    """
+    global _capture_requested
+    if _capture_requested:
+        _capture_requested = False
+        return "true"
+    return "false"
+
+
+@app.post("/trigger-capture")
+def trigger_capture():
+    """
+    사진 촬영 트리거 (외부에서 호출)
+    - 이 엔드포인트 호출 시 ESP32가 다음 폴링에서 사진 촬영
+    """
+    global _capture_requested
+    _capture_requested = True
+    return {"status": "success", "message": "Capture triggered"}
+
+
+@app.post("/upload")
+async def upload_from_esp32(request: Request):
+    """
+    ESP32-CAM에서 raw JPEG 이미지 수신 후 PPE 감지 수행
+    - Content-Type: image/jpeg
+    - API Key 불필요
+    - 이미지 수신 후 자동으로 마스크 감지 수행
+    """
+    from .models.ppe_detector import get_ppe_detector
+
+    try:
+        # raw body 읽기
+        contents = await request.body()
+
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Empty image data")
+
+        # 파일명 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"esp32_{timestamp}.jpg"
+        filepath = os.path.join(UPLOAD_DIR, filename)
+
+        # 이미지 저장
+        with open(filepath, "wb") as f:
+            f.write(contents)
+
+        print(f"📸 ESP32 Image received:")
+        print(f"   - Filename: {filename}")
+        print(f"   - Size: {len(contents)} bytes")
+
+        # PPE(마스크) 감지 수행
+        detector = get_ppe_detector()
+        if detector.is_ready():
+            result = detector.detect_from_bytes(contents)
+            mask_detected = result.get("mask_detected", False)
+
+            # 마지막 감지 결과 업데이트 (ppe.py의 전역 변수)
+            ppe._last_detection_result = {
+                "status": "success",
+                "mask_detected": mask_detected,
+                "message": "마스크 착용 확인됨" if mask_detected else "마스크 미착용"
+            }
+
+            print(f"   - Mask detected: {mask_detected}")
+        else:
+            print("   - PPE detector not ready, skipping detection")
+
+        return {
+            "status": "success",
+            "filename": filename,
+            "size_bytes": len(contents)
+        }
+
+    except Exception as e:
+        print(f"❌ ESP32 upload error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
