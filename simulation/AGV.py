@@ -73,7 +73,7 @@ class AGV:
     def move_y(self, y_value,speed):
         first_position = self.get_position()[1]
         update_position = first_position
-        
+
         if y_value<0:
             while update_position>=first_position+y_value:
                 self.move_yminus(speed)
@@ -84,13 +84,3 @@ class AGV:
                 update_position = self.get_position()[1]
         self.stop()
 
-    def transfer_to_rack(self, block_handles, rack_dummy_handle):
-        dummy_pos = self.sim.getObjectPosition(rack_dummy_handle, self.sim.handle_world)
-        for i, handle in enumerate(block_handles):
-            offset_x = (i % 3) * 0.08
-            offset_y = (i // 3) * 0.08
-            pos = [dummy_pos[0] + offset_x, dummy_pos[1] + offset_y, dummy_pos[2]]
-            self.sim.setObjectPosition(handle, pos, self.sim.handle_world)
-            self.sim.setObjectInt32Param(handle, self.sim.shapeintparam_static, 1)
-            self.sim.setObjectInt32Param(handle, self.sim.shapeintparam_respondable, 1)
-            self.sim.setObjectParent(handle, rack_dummy_handle, True)

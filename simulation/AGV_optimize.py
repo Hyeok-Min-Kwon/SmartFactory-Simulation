@@ -656,6 +656,326 @@ class AGVRouteOptimizer:
         }
 
 
+class AGVPickupOptimizer:
+    """
+    AGV 물품 선택 및 경로 최적화기
+    - 10개 도달한 상자는 필수 적재
+    - AGV 용량 내에서 다른 상자의 물품 추가 선택
+    - 상자 픽업 순서 + 보관 장소 배송 순서 최적화
+    """
+
+    def __init__(self, sim=None, agv_capacity: int = 100, trigger_count: int = 10):
+        """
+        Args:
+            sim: CoppeliaSim sim 객체
+            agv_capacity: AGV 최대 적재 용량 (크기 합계 기준)
+            trigger_count: 트리거 발동 기준 (상자에 쌓인 물품 수)
+        """
+        self.sim = sim
+        self.agv_capacity = agv_capacity
+        self.trigger_count = trigger_count
+        # 빠른 최적화를 위해 파라미터 조정 (6개 이하 위치는 빠르게 수렴)
+        self.sa = SimulatedAnnealing(
+            initial_temp=100.0,      # 낮은 초기 온도
+            cooling_rate=0.95,       # 빠른 냉각
+            min_temp=1.0,            # 빠른 종료
+            max_iterations=500       # 적은 반복 (6개 위치에 충분)
+        )
+
+        # 각 분류별 물품 크기
+        self.item_sizes: Dict[int, int] = {
+            1: 2,
+            2: 10,
+            3: 4,
+            4: 8,
+            5: 6,
+            6: 7
+        }
+
+        # 상자 위치 (Franka가 물건을 놓는 곳) - 분류 1~6
+        self.box_positions: Dict[int, Tuple[float, float, float]] = {
+            1: (4.075, 0.525, 1.25),
+            2: (2.725, 0.525, 1.25),
+            3: (1.5, 0.525, 1.25),
+            4: (0.075, 0.525, 1.25),
+            5: (1.325, -1.025, 1.25),
+            6: (2.625, -1.025, 1.25)
+        }
+
+        # 최종 보관 장소 위치 (rack[0]~[5]) - 분류 1→rack[0], ..., 분류 6→rack[5]
+        self.storage_positions: Dict[int, Tuple[float, float, float]] = {}
+
+        if sim:
+            self._load_rack_positions()
+        else:
+            self._set_default_storage_positions()
+
+    def _load_rack_positions(self):
+        """CoppeliaSim에서 rack 위치 로드"""
+        print("[AGVPickupOptimizer] CoppeliaSim에서 rack 위치 로드 중...")
+        for category in range(1, 7):
+            rack_idx = category - 1  # 분류 1 → rack[0]
+            try:
+                rack_handle = self.sim.getObject(f'/rack[{rack_idx}]')
+                pos = self.sim.getObjectPosition(rack_handle, self.sim.handle_world)
+                self.storage_positions[category] = (pos[0], pos[1], pos[2])
+                print(f"  분류 {category} → rack[{rack_idx}]: ({pos[0]:.3f}, {pos[1]:.3f})")
+            except Exception as e:
+                print(f"  [경고] rack[{rack_idx}] 로드 실패: {e}")
+                # 기본값 사용
+                self.storage_positions[category] = self.box_positions[category]
+    # 
+    def _set_default_storage_positions(self):
+        """기본 보관 장소 좌표 설정 (테스트용)"""
+        self.storage_positions = {
+            1: (5.0, 2.0, 0.0),
+            2: (4.0, 2.0, 0.0),
+            3: (3.0, 2.0, 0.0),
+            4: (2.0, 2.0, 0.0),
+            5: (1.0, 2.0, 0.0),
+            6: (0.0, 2.0, 0.0)
+        }
+
+    def _distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+        """두 점 사이 유클리드 거리 (2D)"""
+        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+
+    def _optimize_route_fast(self,
+                              positions: List[Tuple[float, float]],
+                              start: Tuple[float, float],
+                              return_to_start: bool = True) -> Tuple[List[int], float]:
+        """
+        빠른 경로 최적화 (6개 이하: 브루트포스, 그 이상: SA)
+        6! = 720가지는 즉시 계산 가능
+        """
+        from itertools import permutations
+
+        n = len(positions)
+        if n == 0:
+            return [], 0.0
+        if n == 1:
+            dist = self._distance(start, positions[0])
+            if return_to_start:
+                dist *= 2
+            return [0], dist
+
+        # 6개 이하: 브루트포스 (최적해 보장, 매우 빠름)
+        if n <= 6:
+            best_order = None
+            best_dist = float('inf')
+
+            for perm in permutations(range(n)):
+                dist = self._distance(start, positions[perm[0]])
+                for i in range(len(perm) - 1):
+                    dist += self._distance(positions[perm[i]], positions[perm[i + 1]])
+                if return_to_start:
+                    dist += self._distance(positions[perm[-1]], start)
+
+                if dist < best_dist:
+                    best_dist = dist
+                    best_order = list(perm)
+
+            return best_order, best_dist
+
+        # 7개 이상: SA 사용
+        return self.sa.optimize(positions, start, return_to_start)
+
+    def check_trigger(self, box_counts: Dict[int, int]) -> List[int]:
+        """
+        트리거 발동 조건 확인
+
+        Args:
+            box_counts: 각 상자별 물품 수 {분류: 개수}
+
+        Returns:
+            10개 이상 도달한 상자 분류 리스트
+        """
+        triggered = [cat for cat, count in box_counts.items() if count >= self.trigger_count]
+        return triggered
+
+    def optimize_pickup(self,
+                        box_counts: Dict[int, int],
+                        triggered_boxes: List[int],
+                        agv_start: Tuple[float, float]) -> Dict:
+        """
+        물품 선택 및 경로 최적화
+
+        Args:
+            box_counts: 각 상자별 물품 수 {분류: 개수}
+            triggered_boxes: 트리거된 상자 분류 리스트 (필수 적재)
+            agv_start: AGV 시작 위치 (x, y)
+
+        Returns:
+            {
+                'pickup_plan': {분류: 가져갈 개수},
+                'pickup_order': 상자 방문 순서 [분류, ...],
+                'pickup_path': 상자 방문 경로 [(x, y), ...],
+                'delivery_order': 보관장소 방문 순서 [분류, ...],
+                'delivery_path': 보관장소 방문 경로 [(x, y), ...],
+                'total_items': 총 적재 물품 수,
+                'total_distance': 총 이동 거리
+            }
+        """
+        pickup_plan = {}
+        remaining_capacity = self.agv_capacity  # 크기 합계 기준
+
+        # 1. 트리거된 상자는 전부 적재 (필수)
+        for cat in triggered_boxes:
+            count = box_counts.get(cat, 0)
+            item_size = self.item_sizes.get(cat, 1)
+            if count > 0:
+                # 용량 내에서 최대한 가져감
+                max_take = remaining_capacity // item_size
+                take = min(count, max_take)
+                if take > 0:
+                    pickup_plan[cat] = take
+                    remaining_capacity -= take * item_size
+
+        # 2. 남은 용량으로 다른 상자에서 추가 적재 (효율 기반 Greedy)
+        if remaining_capacity > 0:
+            # 이미 방문할 보관 장소 목록
+            committed_storages = set(pickup_plan.keys())
+
+            # 후보: 트리거되지 않은 상자들
+            candidates = [(cat, count) for cat, count in box_counts.items()
+                          if cat not in triggered_boxes and count > 0]
+
+            # 효율 점수 계산: 같은 보관 장소면 높은 점수, 새 장소면 낮은 점수
+            # 크기가 작을수록 효율적 (같은 용량에 더 많이 담을 수 있음)
+            scored_candidates = []
+            for cat, count in candidates:
+                item_size = self.item_sizes.get(cat, 1)
+                if cat in committed_storages:
+                    # 이미 방문할 보관 장소 → 추가 이동 비용 낮음
+                    efficiency = (count / item_size) * 10  # 높은 점수
+                else:
+                    # 새 보관 장소 추가 → 상자→보관장소 거리 고려
+                    box_pos = self.box_positions[cat][:2]
+                    storage_pos = self.storage_positions[cat][:2]
+                    extra_dist = self._distance(box_pos, storage_pos)
+                    efficiency = (count / item_size) / (1 + extra_dist * 0.5)
+                scored_candidates.append((cat, count, efficiency))
+
+            # 효율 높은 순 정렬
+            scored_candidates.sort(key=lambda x: x[2], reverse=True)
+
+            # 남은 용량 내에서 추가
+            for cat, count, _ in scored_candidates:
+                if remaining_capacity <= 0:
+                    break
+                item_size = self.item_sizes.get(cat, 1)
+                max_take = remaining_capacity // item_size
+                take = min(count, max_take)
+                if take > 0:
+                    pickup_plan[cat] = take
+                    remaining_capacity -= take * item_size
+
+        # 3. 픽업 경로 최적화 (상자 방문 순서) - 빠른 브루트포스 사용
+        pickup_categories = list(pickup_plan.keys())
+        if pickup_categories:
+            pickup_positions = [(self.box_positions[cat][0], self.box_positions[cat][1])
+                                for cat in pickup_categories]
+            pickup_order_idx, _ = self._optimize_route_fast(pickup_positions, agv_start, return_to_start=False)
+            pickup_order = [pickup_categories[i] for i in pickup_order_idx]
+            pickup_path = [agv_start] + [pickup_positions[i] for i in pickup_order_idx]
+        else:
+            pickup_order = []
+            pickup_path = [agv_start]
+
+        # 4. 배송 경로 최적화 (보관 장소 방문 순서) - 빠른 브루트포스 사용
+        # 마지막 상자 위치에서 시작
+        delivery_start = pickup_path[-1] if len(pickup_path) > 1 else agv_start
+
+        delivery_categories = list(set(pickup_plan.keys()))  # 중복 제거
+        if delivery_categories:
+            delivery_positions = [(self.storage_positions[cat][0], self.storage_positions[cat][1])
+                                  for cat in delivery_categories]
+            delivery_order_idx, _ = self._optimize_route_fast(delivery_positions, delivery_start, return_to_start=True)
+            delivery_order = [delivery_categories[i] for i in delivery_order_idx]
+            delivery_path = [delivery_positions[i] for i in delivery_order_idx] + [agv_start]
+        else:
+            delivery_order = []
+            delivery_path = [agv_start]
+
+        # 5. 총 거리 계산
+        total_distance = 0.0
+        full_path = pickup_path + delivery_path[:-1]  # 마지막 복귀점 제외 (중복)
+        for i in range(len(full_path) - 1):
+            total_distance += self._distance(full_path[i], full_path[i + 1])
+        # 마지막 복귀
+        if delivery_path:
+            total_distance += self._distance(delivery_path[-2] if len(delivery_path) > 1 else delivery_start, agv_start)
+
+        # 총 적재량 계산 (개수 및 크기)
+        total_items = sum(pickup_plan.values())
+        total_size = sum(count * self.item_sizes.get(cat, 1) for cat, count in pickup_plan.items())
+
+        return {
+            'pickup_plan': pickup_plan,
+            'pickup_order': pickup_order,
+            'pickup_path': pickup_path,
+            'delivery_order': delivery_order,
+            'delivery_path': delivery_path,
+            'total_items': total_items,
+            'total_size': total_size,
+            'remaining_capacity': remaining_capacity,
+            'total_distance': total_distance
+        }
+
+    def get_full_route(self, optimization_result: Dict) -> List[Dict]:
+        """
+        최적화 결과를 AGV 이동 명령 리스트로 변환
+
+        Args:
+            optimization_result: optimize_pickup() 반환값
+
+        Returns:
+            [
+                {'action': 'move', 'target': (x, y), 'description': '상자 1로 이동'},
+                {'action': 'pickup', 'category': 1, 'count': 10, 'description': '분류 1 물품 10개 적재'},
+                ...
+                {'action': 'dropoff', 'category': 1, 'count': 10, 'description': '분류 1 물품 보관장소에 하차'},
+                ...
+            ]
+        """
+        route = []
+        pickup_plan = optimization_result['pickup_plan']
+        pickup_order = optimization_result['pickup_order']
+        delivery_order = optimization_result['delivery_order']
+
+        # 상자 방문 및 픽업
+        for cat in pickup_order:
+            box_pos = self.box_positions[cat]
+            route.append({
+                'action': 'move',
+                'target': (box_pos[0], box_pos[1]),
+                'description': f'상자 {cat}로 이동'
+            })
+            route.append({
+                'action': 'pickup',
+                'category': cat,
+                'count': pickup_plan[cat],
+                'description': f'분류 {cat} 물품 {pickup_plan[cat]}개 적재'
+            })
+
+        # 보관 장소 방문 및 하차
+        for cat in delivery_order:
+            storage_pos = self.storage_positions[cat]
+            route.append({
+                'action': 'move',
+                'target': (storage_pos[0], storage_pos[1]),
+                'description': f'보관장소 {cat}(rack[{cat-1}])로 이동'
+            })
+            route.append({
+                'action': 'dropoff',
+                'category': cat,
+                'count': pickup_plan[cat],
+                'description': f'분류 {cat} 물품 {pickup_plan[cat]}개 하차'
+            })
+
+        return route
+
+
 # ============ 테스트 코드 ============
 if __name__ == "__main__":
     print("=" * 60)
