@@ -145,6 +145,13 @@ async def test_api_key():
 # 캡처 요청 상태 플래그
 _capture_requested = False
 
+# PPE 감지 결과 (main.py에서 직접 관리)
+_last_ppe_result = {
+    "status": "pending",
+    "mask_detected": False,
+    "message": "아직 감지가 수행되지 않았습니다"
+}
+
 @app.get("/capture-request", response_class=PlainTextResponse)
 def check_capture_request():
     """
@@ -166,15 +173,24 @@ def trigger_capture():
     - 이 엔드포인트 호출 시 ESP32가 다음 폴링에서 사진 촬영
     - 이전 감지 결과를 pending으로 리셋하여 stale data 방지
     """
-    global _capture_requested
+    global _capture_requested, _last_ppe_result
     _capture_requested = True
     # 이전 감지 결과 리셋
-    ppe._last_detection_result = {
+    _last_ppe_result = {
         "status": "pending",
         "mask_detected": False,
         "message": "촬영 요청됨, ESP32 응답 대기 중"
     }
     return {"status": "success", "message": "Capture triggered"}
+
+
+@app.post("/ppe-check")
+def ppe_check():
+    """
+    마지막 PPE 감지 결과 조회
+    - mask_check.py에서 폴링하여 결과 확인
+    """
+    return _last_ppe_result
 
 
 @app.post("/upload")
@@ -208,13 +224,14 @@ async def upload_from_esp32(request: Request):
         print(f"   - Size: {len(contents)} bytes")
 
         # PPE(마스크) 감지 수행
+        global _last_ppe_result
         detector = get_ppe_detector()
         if detector.is_ready():
             result = detector.detect_from_bytes(contents)
             mask_detected = result.get("mask_detected", False)
 
-            # 마지막 감지 결과 업데이트 (ppe.py의 전역 변수)
-            ppe._last_detection_result = {
+            # 마지막 감지 결과 업데이트
+            _last_ppe_result = {
                 "status": "success",
                 "mask_detected": mask_detected,
                 "message": "마스크 착용 확인됨" if mask_detected else "마스크 미착용"

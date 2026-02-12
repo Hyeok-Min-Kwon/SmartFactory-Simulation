@@ -39,7 +39,7 @@ def check_ppe_detection(server_url="http://13.125.121.143:8000", max_wait=10):
             time.sleep(1)  # 1초 간격으로 체크
 
             response = requests.post(
-                f"{server_url}/api/v1/ppe/check",
+                f"{server_url}/ppe-check",
                 timeout=5
             )
 
