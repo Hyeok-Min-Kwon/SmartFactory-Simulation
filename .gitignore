@@ -1,7 +1,8 @@
 # Training
 training/ppe_detection/datasets/
 training/ppe_detection/runs/
-training/classification/datasets/
+training/classification/datasets/MT_*/
+training/classification/datasets/magnetic_tile_defects/
 training/classification/runs/
 *.pt
 
