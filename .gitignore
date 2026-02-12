@@ -10,3 +10,6 @@ training/classification/runs/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Environment
+.env
