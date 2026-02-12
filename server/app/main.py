@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Form, Header, HTTPException, Depends, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
@@ -144,7 +145,7 @@ async def test_api_key():
 # 캡처 요청 상태 플래그
 _capture_requested = False
 
-@app.get("/capture-request")
+@app.get("/capture-request", response_class=PlainTextResponse)
 def check_capture_request():
     """
     ESP32가 폴링하여 사진 촬영 요청 확인
@@ -163,9 +164,16 @@ def trigger_capture():
     """
     사진 촬영 트리거 (외부에서 호출)
     - 이 엔드포인트 호출 시 ESP32가 다음 폴링에서 사진 촬영
+    - 이전 감지 결과를 pending으로 리셋하여 stale data 방지
     """
     global _capture_requested
     _capture_requested = True
+    # 이전 감지 결과 리셋
+    ppe._last_detection_result = {
+        "status": "pending",
+        "mask_detected": False,
+        "message": "촬영 요청됨, ESP32 응답 대기 중"
+    }
     return {"status": "success", "message": "Capture triggered"}
 
 
