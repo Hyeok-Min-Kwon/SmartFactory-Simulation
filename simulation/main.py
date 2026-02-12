@@ -9,6 +9,9 @@ from AGV  import AGV
 # Franka 로봇 제어 모듈 임포트
 # from simulation.franka_robot import FrankaRobot
 from franka_robot import FrankaRobot
+#최적화에 필요한 툴(AGV생성, 랙 위치 소환) 
+#AGV생성을 위해 simulation폴더안에 있는 AGV.ttm파일 경로를 확인해주어야 함.
+from optimization_tool import Optimization
 # CoppeliaSim과 통신할 RemoteAPIClient 객체를 생성합니다
 from mask_check import check_ppe_detection
 # AGV 최적화 모듈 임포트
@@ -61,6 +64,13 @@ agv_busy = False  # AGV가 작업 중인지 여부
 agv_home_position = (3.0, -2.0)  # AGV 대기 위치 (필요시 수정)
 # 이미 처리한 블록을 추적하는 집합
 processed_blocks = set()
+
+# ========== 상자별 블록 데이터 관리 ==========
+box_data = {1: [], 2: [], 3: [], 4: [], 5: [], 6: []}
+defect_to_rack = {1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2}
+rack_dummies = {}
+for i in range(3):
+    rack_dummies[i] = sim.getObject(f'/rack[{i}]/Cuboid/dummy')
 
 # CoppeliaSim 씬에서 'Proximity_sensor'라는 이름의 센서 핸들을 가져옵니다
 # 씬에 있는 proximity sensor의 이름을 정확히 입력해야 합니다
@@ -132,7 +142,6 @@ multi_interrupt = ''
 try:
     # 무한 루프를 시작합니다
     while True:
-    # while cuboidCount <1:
         # 현재 시간을 가져옵니다
         currentTime = time.time()
 
@@ -141,7 +150,7 @@ try:
         detectionState = result[0]
         detectedPoint = result[1]
 
-        # ========== 각 로봇 proximity 센서로 블록 감지 및 팔레타이징 ==========
+        # ========== 각 로봇 proximity 센서로 블록 감지 (idle 로봇만) ==========
         for robot, sensor_handle, robot_name, assigned_keys in robot_config:
             sensor_result = sim.readProximitySensor(sensor_handle)
             if sensor_result[0] and not robot.is_busy:
@@ -241,54 +250,35 @@ try:
         # ========== Cuboid 생성 (2초마다) ==========
         # 마지막 생성 이후 2초가 경과했는지 확인합니다
         if currentTime - lastCuboidTime >= 5.0:
-            # cuboid 카운터를 증가시킵니다
-            cuboidCount += 1
-
             control_signal = sim.getInt32Signal('cube_create')
-            if control_signal is not None and multi_interrupt!= control_signal:
+            if control_signal is not None and multi_interrupt != control_signal:
                 cuboidHandle = control_signal
-            
-            # sim.setShapeMass(cuboidHandle, 0.5)
-            # # createPrimitiveShape는 기본 static → dynamic으로 전환
-            # sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_static, 0)
-            # sim.setObjectInt32Param(cuboidHandle, sim.shapeintparam_respondable, 1)
-            # sim.resetDynamicObject(cuboidHandle)
-            
-
-            # # 생성된 cuboid의 위치를 설정합니다
-            # # setObjectPosition(objectHandle, relativeToObjectHandle, position)
-            # # relativeToObjectHandle: sim.handle_world는 월드 좌표계 기준을 의미합니다
-            # sim.setObjectPosition(
-            #     cuboidHandle,           # 위치를 설정할 객체의 핸들
-            #     sim.handle_world,       # 월드 좌표계 기준
-            #     [6.325, -0.1, 0.8+0.3]    # 목표 위치 [x, y, z] (미터 단위)
-            # )
-
-            # # cuboid를 proximity sensor가 감지할 수 있도록 설정합니다
-            # # setObjectSpecialProperty로 객체의 특수 속성을 설정합니다
-            # # sim.objectspecialproperty_detectable_all: 모든 센서 타입에 의해 감지 가능하게 설정
-            # sim.setObjectSpecialProperty(
-            #     cuboidHandle,                                    # 대상 객체 핸들
-            #     sim.objectspecialproperty_detectable_all         # 모든 센서에 의해 감지 가능
-            # )
-
-            # 생성된 cuboid 핸들을 리스트에 추가합니다
-            #랜덤으로 상품의 불량종류 및 양품값 추출하여 cuboid의 value값으로 저장
-            #0번은 양품 1~6은 불량종류
-
-                rand_product = random.randint(0,6)
-                # print(rand_product)
-                createdCuboids[cuboidHandle]=rand_product
+                cuboidCount += 1
+                rand_product = random.randint(0, 6)
+                createdCuboids[cuboidHandle] = rand_product
                 print(createdCuboids)
-            
-
-            # 마지막 생성 시간을 현재 시간으로 업데이트합니다
                 lastCuboidTime = currentTime
             multi_interrupt = cuboidHandle
-        
-        # 시뮬레이션 스텝 진행 (5 스텝 = 0.1초)
-        for _ in range(5):
-            client.step()
+
+        # ========== AGV 이송 체크 (불량별 5개 이상이면 rack으로 이송) ==========
+        for defect_key in range(1, 7):
+            if len(box_data[defect_key]) >= 5:
+                rack_idx = defect_to_rack[defect_key]
+                dummy_handle = rack_dummies[rack_idx]
+                transfer_count = len(box_data[defect_key])
+                """
+                최적화 알고리즘 들어가서 물체를 옮긴 후 아래 transfer_to_rack으로 물체를 옮김
+                """
+                agv1.transfer_to_rack(box_data[defect_key], dummy_handle)
+                box_data[defect_key] = []
+                place_counters[defect_key] = 0
+                z_layer_offsets[defect_key] = 0.0
+                print(f"[AGV] 불량{defect_key} 블록 {transfer_count}개 rack[{rack_idx}]로 이송 완료, 데이터 초기화")
+
+        # ========== 모든 로봇 업데이트 + 시뮬레이션 스텝 (동시 작업) ==========
+        for robot, _, _, _ in robot_config:
+            robot.update()
+        client.step()
         
 
 # Ctrl+C가 눌리면 KeyboardInterrupt 예외가 발생합니다
