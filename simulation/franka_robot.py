@@ -34,6 +34,7 @@ class FrankaRobot:
         self.robot_path = robot_path
         self.is_busy = False
         self.cuboidCount = 0
+        self._task = None  # 비동기 pick_and_place generator
 
         # 로봇 핸들 가져오기
         self.base_handle = sim.getObject(robot_path)
@@ -616,6 +617,178 @@ class FrankaRobot:
         finally:
             self.is_busy = False
 
+    # ========== 비동기(Generator) 기반 메서드 ==========
+
+    def _move_to_position_gen(self, target_pos, speed=2.0, ease_type='smooth'):
+        """move_to_position의 generator 버전 - yield로 매 스텝 양보"""
+        start_pos = self.sim.getObjectPosition(self.target_dummy, self.sim.handle_world)
+        distance = self._get_distance(start_pos, target_pos)
+
+        if distance < 0.001:
+            return
+
+        duration = distance / speed
+        total_steps = max(int(duration / self.SIM_DT), 10)
+
+        if ease_type == 'smooth':
+            ease_func = self._ease_in_out
+        elif ease_type == 'fast_start':
+            ease_func = self._ease_out
+        elif ease_type == 'fast_end':
+            ease_func = self._ease_in
+        else:
+            ease_func = lambda t: t
+
+        for step in range(1, total_steps + 1):
+            t_linear = step / total_steps
+            t_eased = ease_func(t_linear)
+            interp_pos = self._interpolate_position(start_pos, target_pos, t_eased)
+            self.sim.setObjectPosition(self.target_dummy, interp_pos, self.sim.handle_world)
+            yield
+
+    def _approach_object_gen(self, block_handle, z_offset=0.08, max_speed=0.5,
+                              threshold=0.02, timeout=5.0):
+        """direct_approach_to_object의 generator 버전"""
+        max_steps = int(timeout / self.SIM_DT)
+
+        for step in range(max_steps):
+            block_pos = self.sim.getObjectPosition(block_handle, self.sim.handle_world)
+            goal = [block_pos[0], block_pos[1], block_pos[2] + z_offset]
+            current = self.sim.getObjectPosition(self.target_dummy, self.sim.handle_world)
+            dist_to_goal = self._get_distance(current, goal)
+
+            if dist_to_goal < threshold:
+                yield
+                print(f"[{self.robot_path}] 블록 도달 (step={step}, dist={dist_to_goal:.3f})")
+                self._result = block_pos
+                return
+
+            max_step_dist = max_speed * self.SIM_DT
+            if dist_to_goal <= max_step_dist:
+                new_pos = goal
+            else:
+                ratio = max_step_dist / dist_to_goal
+                new_pos = self._interpolate_position(current, goal, ratio)
+
+            self.sim.setObjectPosition(self.target_dummy, new_pos, self.sim.handle_world)
+            yield
+
+        print(f"[{self.robot_path}] 접근 타임아웃")
+        self._result = self.sim.getObjectPosition(block_handle, self.sim.handle_world)
+
+    def _pick_and_place_gen(self, block_handle, block_pos, place_pos,
+                             place_drop_z=-0.25, cuboid_Count=0, block_number=0):
+        """pick_and_place의 generator 버전 - 매 시뮬레이션 스텝마다 yield"""
+        try:
+            # 1) IK ON
+            self.sim.setInt32Signal(self.IK_status_object, 1)
+            yield
+
+            # 2) 블록으로 접근
+            print(f"[{self.robot_path}] 블록 접근 시작")
+            yield from self._approach_object_gen(
+                block_handle, z_offset=0.08, max_speed=1.0,
+                threshold=0.02, timeout=5.0
+            )
+            block_pos = self._result
+            print(f"[{self.robot_path}] 블록 도착: {[round(v, 3) for v in block_pos]}")
+
+            # 3) 블록 파지
+            self.grasp(block_handle)
+
+            # 4) 위로 들어올림
+            current_pos = self.sim.getObjectPosition(self.target_dummy, self.sim.handle_world)
+            lift_pos = [current_pos[0], current_pos[1], current_pos[2] + 0.15]
+            yield from self._move_to_position_gen(lift_pos, speed=0.5, ease_type='fast_end')
+
+            # 5) IK OFF → 조인트 회전
+            self.sim.setInt32Signal(self.IK_status_object, 0)
+            if block_number in [1, 3, 5]:
+                print(f"[{self.robot_path}] 불량 {block_number}: 조인트1 +90도 회전")
+                angle_rad = math.radians(90)
+            elif block_number in [2, 4, 6]:
+                print(f"[{self.robot_path}] 불량 {block_number}: 조인트1 -90도 회전")
+                angle_rad = math.radians(-90)
+            else:
+                angle_rad = None
+
+            if angle_rad is not None and len(self.joint_handles) >= 1:
+                joint1 = self.joint_handles[0]
+                self.sim.setJointTargetVelocity(joint1, 10)
+                self.sim.setJointTargetPosition(joint1, angle_rad)
+                yield
+
+            # 6) 더미 분리 → IK ON
+            self.sim.setObjectParent(self.target_dummy, -1, True)
+            self.sim.setInt32Signal(self.IK_status_object, 1)
+
+            # 7) 목표 위치로 이동
+            index = cuboid_Count % 9
+            target_place = place_pos[index]
+            print(f"[{self.robot_path}] 목표 위치 이동: {[round(v, 3) for v in target_place]}")
+            yield from self._move_to_position_gen(target_place, speed=2.0, ease_type='smooth')
+
+            # 8) z 방향 하강
+            drop_pos = [target_place[0], target_place[1], target_place[2] + place_drop_z]
+            print(f"[{self.robot_path}] 하강: {[round(v, 3) for v in drop_pos]}")
+            yield from self._move_to_position_gen(drop_pos, speed=0.7, ease_type='fast_start')
+
+            # 9) 블록 놓기
+            self.release(block_handle)
+
+            # 10) 후퇴 (위로)
+            retreat_pos = [drop_pos[0], drop_pos[1], drop_pos[2] + 0.3]
+            yield from self._move_to_position_gen(retreat_pos, speed=0.5, ease_type='fast_end')
+            print(f"[{self.robot_path}] 후퇴")
+
+            # 11) IK OFF → 초기 위치 복귀
+            self.sim.setInt32Signal(self.IK_status_object, 0)
+            self.init_position()
+            for _ in range(10):
+                yield
+
+            # 12) 초기 자세 복귀 (타겟 더미 이동)
+            print(f"[{self.robot_path}] 초기위치로 복귀")
+            yield from self._move_to_position_gen(
+                self.initial_tip_position, speed=5.0, ease_type='smooth'
+            )
+            self.sim.setObjectOrientation(
+                self.target_dummy, self.initial_tip_orientation, self.sim.handle_world
+            )
+            for _ in range(15):
+                yield
+
+            # 13) IK 재활성화
+            self.sim.setInt32Signal(self.IK_status_object, 1)
+            for _ in range(10):
+                yield
+
+            print(f"[{self.robot_path}] 픽앤플레이스 완료")
+
+        except Exception as e:
+            print(f"[{self.robot_path}] 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def start_pick_and_place(self, block_handle, block_pos, place_pos,
+                              place_drop_z=-0.25, cuboid_Count=0, block_number=0):
+        """비동기 pick_and_place 시작 (generator 생성)"""
+        self.is_busy = True
+        self._task = self._pick_and_place_gen(
+            block_handle, block_pos, place_pos,
+            place_drop_z, cuboid_Count, block_number
+        )
+
+    def update(self):
+        """매 시뮬레이션 스텝마다 호출 - generator를 한 스텝 진행"""
+        if self._task is not None:
+            try:
+                next(self._task)
+            except StopIteration:
+                self._task = None
+                self.is_busy = False
+
     def cleanup(self):
         """정리 (target_dummy는 씬에 있으므로 삭제하지 않음)"""
+        self._task = None
         self.target_dummy = None
