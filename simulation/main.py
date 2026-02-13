@@ -17,6 +17,9 @@ from optimization_tool import Optimization
 from mask_check import check_ppe_detection
 # AGV 최적화 모듈 임포트
 from AGV_optimize import AGVPickupOptimizer
+from agv_dispatcher import AGVDispatcher
+
+import random
 
 client = RemoteAPIClient()
 
@@ -26,6 +29,16 @@ sim = client.require('sim')
 # 시뮬레이션 stepping 모드 활성화 (로봇 부드러운 움직임을 위해 필수)
 client.setStepping(True)
 
+
+# # 시뮬레이션을 시작합니다
+# if check_ppe_detection():
+#     sim.startSimulation()
+# else : 
+#     raise KeyError
+
+# 시뮬레이션 시작 메시지를 출력합니다
+print("시뮬레이션 시작 (Stepping 모드)")
+
 # ========== PPE(마스크) 감지 체크 ==========
 # 서버에 요청하여 마스크 착용 여부 확인
 mask_ok = check_ppe_detection()
@@ -33,9 +46,16 @@ mask_ok = check_ppe_detection()
 if mask_ok:
     sim.startSimulation()
     print("시뮬레이션 시작 (Stepping 모드)")
+    
+    
 else:
     print("\n⚠️  마스크 착용이 확인되지 않아 시뮬레이션을 종료합니다.")
     exit(1)
+
+    
+for i in range(6):
+    agv=AGV(sim,client, i)
+    agv.stop()   
 
 # 시뮬레이션 안정화 대기 - stepping 모드에서는 직접 step 호출
 for _ in range(25):  # 0.5초 = 25 스텝 (0.02초 * 25)
@@ -59,6 +79,8 @@ franka3 = FrankaRobot(sim, client, '/Franka[2]')
 # agv_home_position = (3.0, -2.0)  # AGV 대기 위치 (필요시 수정)
 # 이미 처리한 블록을 추적하는 집합
 processed_blocks = set()
+# 로봇별 배치 대기 블록 (배치 완료 후 dispatcher에 등록)
+pending_dispatch_blocks = {}  # robot인스턴스 → (platform_handle, block_handle, defect_type)
 
 # ========== 상자별 블록 데이터 관리 ==========
 box_data = {1: [], 2: [], 3: [], 4: [], 5: [], 6: []}
@@ -126,6 +148,19 @@ place_counters = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
 # 각 키별 z축 레이어 오프셋 (9개 채워지면 0.1씩 증가)
 z_layer_offsets = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0}
 
+# ========== AGV Dispatcher 초기화 ==========
+opt_tool = Optimization(sim, client)
+dispatcher = AGVDispatcher(sim, client, opt_tool, box_data, place_counters, z_layer_offsets)
+
+# 그룹A: OmniPlatform[0]~[3], 용량100, 불량1~4
+for i in range(4):
+    h = sim.getObject(f'/OmniPlatform[{i}]')
+    dispatcher.register_platform(h, 'A', i + 1)
+# 그룹B: OmniPlatform[4]~[5], 용량50, 불량5~6
+for i in range(4, 6):
+    h = sim.getObject(f'/OmniPlatform[{i}]')
+    dispatcher.register_platform(h, 'B', i + 1)
+
 # 로봇별 담당 키 매핑 
 robot_config = [
     (franka1, r1proximsensor, 'Franka0', [1, 2]),
@@ -158,6 +193,12 @@ try:
                         # print(f"[{robot_name}] 블록 감지! 핸들={detected_handle}, 번호={block_number}, 위치={[round(v,3) for v in block_pos]}")
                         processed_blocks.add(detected_handle)
 
+                        # 배치 완료 후 dispatcher에 등록하기 위해 대기열에 저장
+                        # (센서 감지 시점이 아닌, 로봇이 place 완료한 후에 트리거)
+                        target_platform = dispatcher.find_platform_for_defect(block_number)
+                        if target_platform is not None:
+                            pending_dispatch_blocks[robot] = (target_platform, detected_handle, block_number)
+
                         key = block_number
                         counter = place_counters[key]
                         index = counter % 9
@@ -167,7 +208,7 @@ try:
                         positions = place_positions_data[key]
                         place_pos_with_z = [[p[0], p[1], p[2] + z_offset] for p in positions]
 
-                        robot.pick_and_place(
+                        robot.start_pick_and_place(
                             block_handle=detected_handle,
                             block_pos=block_pos,
                             place_pos=place_pos_with_z,
@@ -244,13 +285,14 @@ try:
 
         # ========== Cuboid 생성 (10초마다) ==========
         # 마지막 생성 이후 10초가 경과했는지 확인합니다
-        if currentTime - lastCuboidTime >= 15.0:
+        if currentTime - lastCuboidTime >= 10.0:
             control_signal = sim.getInt32Signal('cube_create')
             if control_signal is not None and multi_interrupt != control_signal:
                 cuboidHandle = control_signal
                 cuboidCount += 1
                 # 서버에 이미지 전송하여 분류 결과 받기 (0~5)
                 rand_product = get_product_label()
+                # rand_product  = random.randint(1,4)
                 createdCuboids[cuboidHandle] = rand_product
                 print(createdCuboids)
                 lastCuboidTime = currentTime
@@ -274,6 +316,11 @@ try:
         # ========== 모든 로봇 업데이트 + 시뮬레이션 스텝 (동시 작업) ==========
         for robot, _, _, _ in robot_config:
             robot.update()
+            # 로봇이 블록 배치를 완료했으면 dispatcher에 등록 (정확한 트리거)
+            if robot in pending_dispatch_blocks and not robot.is_busy:
+                ph, bh, dt = pending_dispatch_blocks.pop(robot)
+                dispatcher.add_block(ph, bh, dt)
+        dispatcher.update()
         client.step()
         
 
