@@ -16,6 +16,9 @@ const char* uploadEndpoint = "/upload";                  // 사진 업로드 엔
 unsigned long lastPollTime = 0;
 const unsigned long pollInterval = 2000;  // 2초마다 서버 확인
 
+// 사진 전송 완료 후 폴링 중단 플래그
+bool uploadDone = false;
+
 // 카메라 핀 설정
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
@@ -188,9 +191,15 @@ void loop() {
       return;
     }
 
+    // 사진 전송 완료 후 폴링 중단
+    if (uploadDone) return;
+
     // 서버에 사진 요청이 있는지 확인
     if (checkCaptureRequest()) {
-      captureAndUpload();
+      if (captureAndUpload()) {
+        uploadDone = true;
+        Serial.println("Upload complete. Polling stopped.");
+      }
     }
   }
 }
