@@ -4,17 +4,20 @@
 #include "constants.h"
 
 // WiFi 설정
-//const char* ssid = "";
-//const char* password = "";
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 // 서버 설정
-const char* serverUrl = "http://13.125.121.143:8000";
+const char* serverUrl = SERVER_URL;
 const char* captureCheckEndpoint = "/capture-request";  // 사진 요청 확인 엔드포인트
 const char* uploadEndpoint = "/upload";                  // 사진 업로드 엔드포인트
 
-// 폴링 간격 (밀리초)
+// 폴링 간격
 unsigned long lastPollTime = 0;
 const unsigned long pollInterval = 2000;  // 2초마다 서버 확인
+
+// 사진 전송 완료 후 폴링 중단 플래그
+bool uploadDone = false;
 
 // 카메라 핀 설정
 #define PWDN_GPIO_NUM     32
@@ -56,21 +59,21 @@ void initCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  
+
   // 이미지 크기 및 품질 설정
   config.frame_size = FRAMESIZE_VGA;  // 640x480
-  config.jpeg_quality = 12;           
+  config.jpeg_quality = 12;
   config.fb_count = 2;
   config.grab_mode = CAMERA_GRAB_LATEST;
-  
+
   // 카메라 초기화
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed: 0x%x\n", err);
     return;
   }
-  
-  Serial.println("✅ Camera initialized successfully");
+
+  Serial.println(":white_check_mark: Camera initialized successfully");
 }
 
 // 서버에 사진 요청이 있는지 확인
@@ -84,7 +87,7 @@ bool checkCaptureRequest() {
   if (httpCode == 200) {
     String response = http.getString();
     http.end();
-    // 서버에서 "true" 또는 "1"을 반환하면 사진 촬영
+    // 서버에서 true 또는 1을 반환하면 사진 촬영
     if (response == "true" || response == "1") {
       return true;
     }
@@ -98,19 +101,19 @@ bool checkCaptureRequest() {
 
 // 사진 촬영 후 서버로 업로드
 bool captureAndUpload() {
-  Serial.println("\n📸 Capture request from server");
+  Serial.println("\n:camera_with_flash: Capture request from server");
 
   unsigned long start = millis();
 
   // 이미지 촬영
   camera_fb_t * fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("❌ Camera capture failed");
+    Serial.println(":x: Camera capture failed");
     return false;
   }
 
   unsigned long captureTime = millis() - start;
-  Serial.printf("✅ Photo captured!\n");
+  Serial.printf(":white_check_mark: Photo captured!\n");
   Serial.printf("   Size: %d bytes\n", fb->len);
   Serial.printf("   Capture time: %lu ms\n", captureTime);
 
@@ -126,11 +129,11 @@ bool captureAndUpload() {
   esp_camera_fb_return(fb);
 
   if (httpCode == 200) {
-    Serial.println("✅ Image uploaded successfully");
+    Serial.println(":white_check_mark: Image uploaded successfully");
     http.end();
     return true;
   } else {
-    Serial.printf("❌ Upload failed, code: %d\n", httpCode);
+    Serial.printf(":x: Upload failed, code: %d\n", httpCode);
     http.end();
     return false;
   }
@@ -138,7 +141,7 @@ bool captureAndUpload() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n🚀 ESP32-CAM Starting...");
+  Serial.println("\n\n:rocket: ESP32-CAM Starting...");
   Serial.println("================================");
 
   // WiFi 연결
@@ -155,12 +158,12 @@ void setup() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi Connected!");
-    Serial.print("📍 IP Address: ");
+    Serial.println("\n:white_check_mark: WiFi Connected!");
+    Serial.print(":round_pushpin: IP Address: ");
     Serial.println(WiFi.localIP());
-    Serial.printf("📶 Signal Strength: %d dBm\n", WiFi.RSSI());
+    Serial.printf(":signal_strength: Signal Strength: %d dBm\n", WiFi.RSSI());
   } else {
-    Serial.println("\n❌ WiFi Connection Failed!");
+    Serial.println("\n:x: WiFi Connection Failed!");
     Serial.println("Check SSID and Password");
     return;
   }
@@ -169,7 +172,7 @@ void setup() {
   initCamera();
 
   Serial.println("================================");
-  Serial.printf("🌐 Server: %s\n", serverUrl);
+  Serial.printf(":globe_with_meridians: Server: %s\n", serverUrl);
   Serial.println("Waiting for capture requests...");
   Serial.println("================================\n");
 }
@@ -188,9 +191,15 @@ void loop() {
       return;
     }
 
+    // 사진 전송 완료 후 폴링 중단
+    if (uploadDone) return;
+
     // 서버에 사진 요청이 있는지 확인
     if (checkCaptureRequest()) {
-      captureAndUpload();
+      if (captureAndUpload()) {
+        uploadDone = true;
+        Serial.println("Upload complete. Polling stopped.");
+      }
     }
   }
 }

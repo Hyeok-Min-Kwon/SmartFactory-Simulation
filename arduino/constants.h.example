@@ -1,0 +1,8 @@
+#pragma once
+
+// WiFi 설정
+#define WIFI_SSID     "your_wifi_ssid"
+#define WIFI_PASSWORD "your_wifi_password"
+
+// 서버 설정
+#define SERVER_URL "http://your_server_ip:8000"

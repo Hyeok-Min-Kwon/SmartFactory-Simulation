@@ -29,25 +29,33 @@ sim = client.require('sim')
 # 시뮬레이션 stepping 모드 활성화 (로봇 부드러운 움직임을 위해 필수)
 client.setStepping(True)
 
+
 # # 시뮬레이션을 시작합니다
 # if check_ppe_detection():
 #     sim.startSimulation()
 # else : 
 #     raise KeyError
 
-sim.startSimulation()
-for i in range(6):
-    agv=AGV(sim,client, i)
-    agv.stop()
 # 시뮬레이션 시작 메시지를 출력합니다
 print("시뮬레이션 시작 (Stepping 모드)")
 
 # ========== PPE(마스크) 감지 체크 ==========
 # 서버에 요청하여 마스크 착용 여부 확인
-# if not check_ppe_detection():
-#     print("\n⚠️  마스크 착용이 확인되지 않아 시뮬레이션을 종료합니다.")
-#     sim.stopSimulation()
-#     exit(1)
+mask_ok = check_ppe_detection()
+
+if mask_ok:
+    sim.startSimulation()
+    print("시뮬레이션 시작 (Stepping 모드)")
+    
+    
+else:
+    print("\n⚠️  마스크 착용이 확인되지 않아 시뮬레이션을 종료합니다.")
+    exit(1)
+
+    
+for i in range(6):
+    agv=AGV(sim,client, i)
+    agv.stop()   
 
 # 시뮬레이션 안정화 대기 - stepping 모드에서는 직접 step 호출
 for _ in range(25):  # 0.5초 = 25 스텝 (0.02초 * 25)
